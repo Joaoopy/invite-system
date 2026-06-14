@@ -11,7 +11,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_PATH = path.join(__dirname, "invites.db");
 
-// ── Discord Config ─────────────────────────────────────────────
 const DISCORD = {
   clientId:     process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
@@ -19,10 +18,49 @@ const DISCORD = {
   guildId:      "1513325231647752213",
   redirectUri:  process.env.REDIRECT_URI || "http://localhost:3000/auth/callback",
   teamRoleId:   "1513341421749407985",
-  adminRoles:   ["1513341421749407985","1513570942415147219"],
+  adminRoles:   ["1513341421749407985", "1513570942415147219"],
 };
 
-// ── DB ─────────────────────────────────────────────────────────
+// ── Cache de membros ────────────────────────────────────────────
+const membersCache = {
+  data: null,
+  lastFetch: 0,
+  TTL: 5 * 60 * 1000, // 5 minutos
+};
+
+async function getMembers(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && membersCache.data && (now - membersCache.lastFetch) < membersCache.TTL) {
+    return membersCache.data;
+  }
+
+  let members = [];
+  let after = "0";
+
+  while (true) {
+    const r = await axios.get(
+      `https://discord.com/api/guilds/${DISCORD.guildId}/members?limit=100&after=${after}`,
+      {
+        headers: { Authorization: `Bot ${DISCORD.botToken}` },
+        timeout: 10000,
+      }
+    );
+    if (!r.data.length) break;
+    members = members.concat(r.data);
+    after = r.data[r.data.length - 1].user.id;
+    if (r.data.length < 100) break;
+
+    // Pequena pausa entre páginas para não estourar rate limit
+    await new Promise(res => setTimeout(res, 200));
+  }
+
+  membersCache.data = members;
+  membersCache.lastFetch = Date.now();
+  console.log(`[Cache] ${members.length} membros carregados.`);
+  return members;
+}
+
+// ── DB ──────────────────────────────────────────────────────────
 let db;
 async function initDB() {
   const SQL = await initSqlJs();
@@ -79,7 +117,7 @@ function logAction(action, details) {
   run("INSERT INTO logs (action, details) VALUES (?, ?)", [action, JSON.stringify(details)]);
 }
 
-// ── Middleware ─────────────────────────────────────────────────
+// ── Middleware ──────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 app.use(session({
@@ -90,27 +128,23 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "../frontend/public")));
 
-// ── Auth Helpers ───────────────────────────────────────────────
-function isTeam(roles) {
-  return roles.includes(DISCORD.teamRoleId);
-}
-function isAdmin(roles) {
-  return DISCORD.adminRoles.some(r => roles.includes(r));
-}
+// ── Auth helpers ────────────────────────────────────────────────
+function isTeam(roles)  { return roles.includes(DISCORD.teamRoleId); }
+function isAdmin(roles) { return DISCORD.adminRoles.some(r => roles.includes(r)); }
 
 function requireTeam(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
-  if (!isTeam(req.session.user.roles)) return res.status(403).json({ error: "Sem permissão." });
+  if (!req.session.user.isTeam) return res.status(403).json({ error: "Sem permissão." });
   next();
 }
 
 function requireAdmin(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
-  if (!isAdmin(req.session.user.roles)) return res.status(403).json({ error: "Acesso admin necessário." });
+  if (!req.session.user.isAdmin) return res.status(403).json({ error: "Acesso admin necessário." });
   next();
 }
 
-// ── Discord OAuth2 ─────────────────────────────────────────────
+// ── OAuth2 ──────────────────────────────────────────────────────
 app.get("/auth/login", (req, res) => {
   const params = new URLSearchParams({
     client_id:     DISCORD.clientId,
@@ -124,10 +158,9 @@ app.get("/auth/login", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   if (!code) return res.redirect("/?error=no_code");
-
   try {
-    // Trocar code por token
-    const tokenRes = await axios.post("https://discord.com/api/oauth2/token",
+    const tokenRes = await axios.post(
+      "https://discord.com/api/oauth2/token",
       new URLSearchParams({
         client_id:     DISCORD.clientId,
         client_secret: DISCORD.clientSecret,
@@ -137,28 +170,21 @@ app.get("/auth/callback", async (req, res) => {
       }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
-
     const { access_token } = tokenRes.data;
 
-    // Buscar dados do usuário
     const userRes = await axios.get("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${access_token}` },
     });
     const { id, username, avatar } = userRes.data;
 
-    // Buscar cargos no servidor via bot token
     const memberRes = await axios.get(
       `https://discord.com/api/guilds/${DISCORD.guildId}/members/${id}`,
       { headers: { Authorization: `Bot ${DISCORD.botToken}` } }
     );
     const roles = memberRes.data.roles || [];
 
-    // Verificar se é membro da equipe
-    if (!isTeam(roles)) {
-      return res.redirect("/?error=no_access");
-    }
+    if (!isTeam(roles)) return res.redirect("/?error=no_access");
 
-    // Salvar/atualizar usuário no DB
     const avatarUrl = avatar
       ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png`
       : null;
@@ -170,16 +196,13 @@ app.get("/auth/callback", async (req, res) => {
       run("INSERT INTO users (userId, username, avatar) VALUES (?, ?, ?)", [id, username, avatarUrl]);
     }
 
-    // Salvar sessão
     req.session.user = {
       id, username, avatar: avatarUrl,
-      roles,
-      isAdmin: isAdmin(roles),
-      isTeam: true,
+      roles, isAdmin: isAdmin(roles), isTeam: true,
     };
 
     logAction("LOGIN", { userId: id, username });
-    res.redirect("/dashboard");
+    res.redirect("/");
   } catch (err) {
     console.error("[OAuth2 Error]", err.response?.data || err.message);
     res.redirect("/?error=auth_failed");
@@ -196,36 +219,22 @@ app.get("/auth/me", (req, res) => {
   res.json({ authenticated: true, user: req.session.user });
 });
 
-// ── Team Members via Bot ───────────────────────────────────────
+// ── Team ─────────────────────────────────────────────────────────
 app.get("/api/team", requireTeam, async (req, res) => {
   try {
-    let members = [];
-    let after = "0";
-
-    // Paginar membros do servidor (max 1000)
-    while (true) {
-      const r = await axios.get(
-        `https://discord.com/api/guilds/${DISCORD.guildId}/members?limit=100&after=${after}`,
-        { headers: { Authorization: `Bot ${DISCORD.botToken}` } }
-      );
-      if (!r.data.length) break;
-      members = members.concat(r.data);
-      after = r.data[r.data.length - 1].user.id;
-      if (r.data.length < 100) break;
-    }
-
+    const members = await getMembers();
     const team = members
       .filter(m => m.roles.includes(DISCORD.teamRoleId))
       .map(m => ({
         userId:   m.user.id,
         username: m.user.username,
+        nick:     m.nick || null,
         avatar:   m.user.avatar
           ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
           : null,
-        roles: m.roles,
+        roles:   m.roles,
         isAdmin: isAdmin(m.roles),
       }));
-
     res.json(team);
   } catch (err) {
     console.error("[Team Error]", err.response?.data || err.message);
@@ -233,39 +242,90 @@ app.get("/api/team", requireTeam, async (req, res) => {
   }
 });
 
-// ── Stats pessoais ─────────────────────────────────────────────
+// ── Busca de membros ─────────────────────────────────────────────
+app.get("/api/user/search", requireTeam, async (req, res) => {
+  const q = (req.query.q || "").toLowerCase().trim();
+  if (!q) return res.json([]);
+  try {
+    const members = await getMembers();
+    const results = members
+      .filter(m =>
+        m.user.id === q ||
+        m.user.username.toLowerCase().includes(q) ||
+        (m.nick || "").toLowerCase().includes(q)
+      )
+      .slice(0, 20)
+      .map(m => {
+        const local = query("SELECT totalInvites FROM users WHERE userId = ?", [m.user.id]);
+        return {
+          userId:       m.user.id,
+          username:     m.user.username,
+          nick:         m.nick || null,
+          avatar:       m.user.avatar
+            ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
+            : null,
+          totalInvites: local.length ? local[0].totalInvites : 0,
+          roles:        m.roles,
+          isAdmin:      isAdmin(m.roles),
+          isTeam:       isTeam(m.roles),
+        };
+      });
+    res.json(results);
+  } catch (err) {
+    console.error("[Search Error]", err.response?.data || err.message);
+    res.status(500).json({ error: "Erro ao buscar." });
+  }
+});
+
+// ── Forçar refresh do cache (admin) ─────────────────────────────
+app.post("/api/admin/refresh-cache", requireAdmin, async (req, res) => {
+  try {
+    await getMembers(true);
+    res.json({ success: true, message: "Cache atualizado." });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao atualizar cache." });
+  }
+});
+
+// ── Stats pessoais ───────────────────────────────────────────────
 app.get("/api/my-stats", requireTeam, (req, res) => {
   const userId = req.session.user.id;
-
-  const total = query(
-    "SELECT COUNT(*) AS c FROM invites WHERE invitedById = ?", [userId]
-  )[0].c;
-
-  const today = query(
-    "SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date(date) = date('now')", [userId]
-  )[0].c;
-
-  const week = query(
-    "SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date >= datetime('now','-7 days')", [userId]
-  )[0].c;
-
-  const month = query(
-    "SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND strftime('%Y-%m',date) = strftime('%Y-%m','now')", [userId]
-  )[0].c;
-
-  const history = query(
-    "SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC LIMIT 10", [userId]
-  );
-
-  const myRank = query(`
-    SELECT COUNT(*) + 1 AS rank FROM users
-    WHERE totalInvites > (SELECT totalInvites FROM users WHERE userId = ?)
-  `, [userId])[0].rank;
-
+  const total   = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ?", [userId])[0].c;
+  const today   = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date(date) = date('now')", [userId])[0].c;
+  const week    = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date >= datetime('now','-7 days')", [userId])[0].c;
+  const month   = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND strftime('%Y-%m',date) = strftime('%Y-%m','now')", [userId])[0].c;
+  const history = query("SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC LIMIT 10", [userId]);
+  const myRank  = query("SELECT COUNT(*) + 1 AS rank FROM users WHERE totalInvites > (SELECT totalInvites FROM users WHERE userId = ?)", [userId])[0].rank;
   res.json({ total, today, week, month, history, rank: myRank });
 });
 
-// ── Public routes (team only) ──────────────────────────────────
+// ── Ranking ──────────────────────────────────────────────────────
+app.get("/api/invites/ranking", requireTeam, (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  res.json(query(
+    "SELECT userId, username, avatar, totalInvites FROM users WHERE totalInvites > 0 ORDER BY totalInvites DESC LIMIT ?",
+    [limit]
+  ));
+});
+
+app.get("/api/invites/ranking/monthly", requireTeam, (req, res) => {
+  res.json(query(`
+    SELECT invitedById AS userId, invitedBy AS username, COUNT(*) AS totalInvites
+    FROM invites WHERE invitedById IS NOT NULL
+      AND strftime('%Y-%m',date) = strftime('%Y-%m','now')
+    GROUP BY invitedById ORDER BY totalInvites DESC LIMIT 20
+  `));
+});
+
+// ── Stats dashboard ──────────────────────────────────────────────
+app.get("/api/stats", requireTeam, (req, res) => {
+  const totalInvites   = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL")[0].c;
+  const monthlyInvites = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL AND strftime('%Y-%m',date)=strftime('%Y-%m','now')")[0].c;
+  const lastMembers    = query("SELECT userId, username, invitedBy, date FROM invites ORDER BY date DESC LIMIT 5");
+  res.json({ totalInvites, monthlyInvites, lastMembers });
+});
+
+// ── Bot registra novo membro ─────────────────────────────────────
 app.post("/api/invites", (req, res) => {
   const { userId, username, invitedBy, invitedById, avatar } = req.body;
   if (!userId || !username) return res.status(400).json({ error: "Dados insuficientes." });
@@ -289,38 +349,14 @@ app.post("/api/invites", (req, res) => {
     }
   }
 
+  // Invalidar cache ao entrar novo membro
+  membersCache.lastFetch = 0;
+
   logAction("NEW_MEMBER", { userId, username, invitedBy });
   res.json({ success: true });
 });
 
-app.get("/api/invites/ranking", requireTeam, (req, res) => {
-  const limit = parseInt(req.query.limit) || 20;
-  const rows = query(
-    "SELECT userId, username, avatar, totalInvites FROM users WHERE totalInvites > 0 ORDER BY totalInvites DESC LIMIT ?",
-    [limit]
-  );
-  res.json(rows);
-});
-
-app.get("/api/invites/ranking/monthly", requireTeam, (req, res) => {
-  const rows = query(`
-    SELECT invitedById AS userId, invitedBy AS username, COUNT(*) AS totalInvites
-    FROM invites WHERE invitedById IS NOT NULL
-      AND strftime('%Y-%m',date) = strftime('%Y-%m','now')
-    GROUP BY invitedById ORDER BY totalInvites DESC LIMIT 20
-  `);
-  res.json(rows);
-});
-
-app.get("/api/stats", requireTeam, (req, res) => {
-  const totalMembers   = query("SELECT COUNT(*) AS c FROM users")[0].c;
-  const totalInvites   = query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL")[0].c;
-  const monthlyInvites = query(`SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL AND strftime('%Y-%m',date)=strftime('%Y-%m','now')`)[0].c;
-  const lastMembers    = query("SELECT userId, username, invitedBy, date FROM invites ORDER BY date DESC LIMIT 5");
-  res.json({ totalMembers, totalInvites, monthlyInvites, lastMembers });
-});
-
-// ── Admin routes ───────────────────────────────────────────────
+// ── Admin routes ─────────────────────────────────────────────────
 app.get("/api/invites/history", requireAdmin, (req, res) => {
   const page   = parseInt(req.query.page)  || 1;
   const limit  = parseInt(req.query.limit) || 30;
@@ -330,82 +366,11 @@ app.get("/api/invites/history", requireAdmin, (req, res) => {
   res.json({ total, page, limit, data });
 });
 
-app.get("/api/user/search", requireTeam, async (req, res) => {
-  const q = (req.query.q || "").toLowerCase().trim();
-
-  if (!q) {
-    return res.json([]);
-  }
-
-  try {
-    let members = [];
-    let after = "0";
-
-    while (true) {
-      const r = await axios.get(
-        `https://discord.com/api/guilds/${DISCORD.guildId}/members?limit=100&after=${after}`,
-        {
-          headers: {
-            Authorization: `Bot ${DISCORD.botToken}`
-          }
-        }
-      );
-
-      if (!r.data.length) break;
-
-      members = members.concat(r.data);
-      after = r.data[r.data.length - 1].user.id;
-
-      if (r.data.length < 100) break;
-    }
-
-    const results = members
-      .filter(m =>
-        m.user.id === q ||
-        m.user.username.toLowerCase().includes(q) ||
-        (m.nick || "").toLowerCase().includes(q)
-      )
-      .slice(0, 20)
-      .map(m => {
-        const local = query(
-          "SELECT totalInvites FROM users WHERE userId = ?",
-          [m.user.id]
-        );
-
-        return {
-          userId: m.user.id,
-          username: m.user.username,
-          nick: m.nick || null,
-          avatar: m.user.avatar
-            ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
-            : null,
-          totalInvites: local.length ? local[0].totalInvites : 0,
-          roles: m.roles,
-          isAdmin: isAdmin(m.roles),
-          isTeam: isTeam(m.roles),
-        };
-      });
-
-    res.json(results);
-
-  } catch (err) {
-    console.error("[Search Error]", err.response?.data || err.message);
-
-    res.status(500).json({
-      error: "Erro ao buscar."
-    });
-  }
-});
-
 app.get("/api/user/:userId", requireTeam, (req, res) => {
   const user = query("SELECT * FROM users WHERE userId = ?", [req.params.userId]);
   if (!user.length) return res.status(404).json({ error: "Não encontrado." });
-  const invitedPeople = query(
-    "SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC", [req.params.userId]
-  );
-  const joinedVia = query(
-    "SELECT invitedBy, date FROM invites WHERE userId = ? ORDER BY date ASC LIMIT 1", [req.params.userId]
-  )[0] || null;
+  const invitedPeople = query("SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC", [req.params.userId]);
+  const joinedVia     = query("SELECT invitedBy, date FROM invites WHERE userId = ? ORDER BY date ASC LIMIT 1", [req.params.userId])[0] || null;
   res.json({ ...user[0], invitedPeople, joinedVia });
 });
 
@@ -433,31 +398,6 @@ app.delete("/api/admin/member/:userId", requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/api/admin/seed", requireAdmin, (req, res) => {
-  const demo = [
-    { userId:"111", username:"Coronel_Hawk",  invites:24 },
-    { userId:"222", username:"Sargento_Rex",  invites:18 },
-    { userId:"333", username:"Cabo_Viper",    invites:12 },
-    { userId:"444", username:"Soldado_Ghost", invites:8  },
-    { userId:"555", username:"Recruta_Nova",  invites:5  },
-    { userId:"666", username:"Tenente_Raven", invites:3  },
-  ];
-  for (const u of demo) {
-    run("INSERT OR REPLACE INTO users (userId, username, totalInvites) VALUES (?, ?, ?)",
-      [u.userId, u.username, u.invites]);
-    for (let i = 0; i < u.invites; i++) {
-      run("INSERT INTO invites (userId, username, invitedById, invitedBy) VALUES (?, ?, ?, ?)",
-        [`member_${u.userId}_${i}`, `Membro_${Math.floor(Math.random()*9999)}`, u.userId, u.username]);
-    }
-  }
-  res.json({ success: true });
-});
-
-// Servir SPA para rotas do frontend
-app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/public/index.html"));
-});
-
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/public/index.html"));
 });
@@ -465,5 +405,7 @@ app.get("*", (req, res) => {
 initDB().then(() => {
   app.listen(PORT, () => {
     console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
+    // Pré-aquecer cache ao iniciar
+    getMembers().catch(e => console.error("[Cache warmup]", e.message));
   });
 });
