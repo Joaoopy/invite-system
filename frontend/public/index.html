@@ -805,40 +805,39 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
         <div class="sec-head" style="margin-bottom:20px">
           <div><div class="sec-title">Administração</div><div class="sec-sub">Controles do sistema</div></div>
         </div>
-        <div class="admin-grid">
+        <div style="display:flex;flex-direction:column;gap:14px">
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-trophy"/></svg> Ajustar Convites</div>
-            <div class="input-row" style="margin-bottom:8px;flex-wrap:wrap">
-              <input class="input" id="adjId" placeholder="Discord ID"/>
-              <input class="input" style="max-width:80px" id="adjTotal" type="number" placeholder="N"/>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <input class="input" id="adjId" placeholder="Discord ID do usuário"/>
+              <input class="input" id="adjTotal" type="number" placeholder="Novo total de convites"/>
+              <button class="btn btn-primary" onclick="adminSet()" style="justify-content:center">
+                <svg width="13" height="13"><use href="#ic-trophy"/></svg> Salvar
+              </button>
             </div>
-            <button class="btn btn-primary" onclick="adminSet()" style="width:100%;justify-content:center;margin-top:4px">Salvar</button>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-refresh"/></svg> Resetar Convites</div>
-            <div class="input-row">
-              <input class="input" id="resetId" placeholder="Discord ID"/>
-              <button class="btn btn-danger" onclick="adminReset()">Resetar</button>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <input class="input" id="resetId" placeholder="Discord ID do usuário"/>
+              <button class="btn btn-danger" onclick="adminReset()" style="justify-content:center">
+                <svg width="13" height="13"><use href="#ic-refresh"/></svg> Zerar para zero
+              </button>
             </div>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-user"/></svg> Remover Membro</div>
-            <div class="input-row">
-              <input class="input" id="delId" placeholder="Discord ID"/>
-              <button class="btn btn-danger" onclick="adminDel()">Remover</button>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <input class="input" id="delId" placeholder="Discord ID do usuário"/>
+              <button class="btn btn-danger" onclick="adminDel()" style="justify-content:center">
+                <svg width="13" height="13"><use href="#ic-user"/></svg> Remover do sistema
+              </button>
             </div>
           </div>
           <div class="admin-card">
-            <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-seed"/></svg> Dados Demo</div>
-            <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Popula o banco com dados de demonstração.</p>
-            <button class="btn btn-gold" onclick="adminSeed()">
-              <svg width="13" height="13"><use href="#ic-seed"/></svg> Inserir Demo
-            </button>
-          </div>
-          <div class="admin-card" style="grid-column:1/-1">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-log"/></svg> Logs do Sistema</div>
             <div class="log-box" id="adminLogs">Carregando...</div>
-            <button class="btn btn-ghost" style="margin-top:10px" onclick="loadLogs()">
+            <button class="btn btn-ghost" style="margin-top:10px;width:100%;justify-content:center" onclick="loadLogs()">
               <svg width="13" height="13"><use href="#ic-refresh"/></svg> Atualizar Logs
             </button>
           </div>
@@ -1177,22 +1176,29 @@ async function searchProfile(){
   const el = document.getElementById("profileResult");
   el.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
   try{
-    // Tentar busca por nome/id
     const results = await api(`/api/user/search?q=${encodeURIComponent(q)}`);
     if(!results.length){ el.innerHTML = emptyState("ic-search","Nenhum resultado encontrado."); return; }
-    if(results.length===1){
-      showProfile(results[0].userId, el);
+    if(results.length === 1){
+      renderProfileCard(results[0], el);
     } else {
-      // Mostrar lista
       el.innerHTML = `
 <div class="table-wrap">
   <table class="dtable">
-    <thead><tr><th>Usuário</th><th>Convites</th><th></th></tr></thead>
+    <thead><tr><th>Usuário</th><th>Convites</th><th>Cargo</th><th></th></tr></thead>
     <tbody>${results.map(r=>`
       <tr>
-        <td><div style="font-weight:500;color:var(--text-bright)">${esc(r.username)}</div><div class="mono">${r.userId}</div></td>
+        <td>
+          <div style="font-weight:500;color:var(--text-bright)">${esc(r.nick||r.username)}</div>
+          <div class="mono">${r.userId}</div>
+        </td>
         <td>${r.totalInvites}</td>
-        <td><button class="btn btn-ghost" onclick="showProfile('${r.userId}',document.getElementById('profileResult'))">Ver</button></td>
+        <td>${r.isAdmin
+          ?`<span class="tag tag-yellow">Admin</span>`
+          :r.isTeam
+          ?`<span class="tag tag-blue">Equipe</span>`
+          :`<span class="tag">Membro</span>`}
+        </td>
+        <td><button class="btn btn-ghost" onclick="selectProfile('${r.userId}')">Ver</button></td>
       </tr>`).join("")}
     </tbody>
   </table>
@@ -1201,33 +1207,32 @@ async function searchProfile(){
   }catch(e){ el.innerHTML = emptyState("ic-search","Erro na busca."); }
 }
 
-async function showProfile(userId, el){
-  el.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
-  try{
-    const u = await api(`/api/user/${encodeURIComponent(userId)}`);
-    const init = (u.username||"?")[0].toUpperCase();
-    el.innerHTML = `
+async function selectProfile(userId){
+  const results = await api(`/api/user/search?q=${encodeURIComponent(userId)}`);
+  const u = results.find(r => r.userId === userId);
+  if(u) renderProfileCard(u, document.getElementById("profileResult"));
+}
+
+function renderProfileCard(u, el){
+  const init = (u.username||"?")[0].toUpperCase();
+  el.innerHTML = `
 <div class="profile-hero">
-  <div class="profile-av">${u.avatar?`<img src="${esc(u.avatar)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentElement.textContent='${init}'">`:init}</div>
-  <div>
-    <div class="profile-name">${esc(u.username)}</div>
-    <div class="profile-id">ID: ${esc(u.userId)}</div>
-    ${u.joinedVia?`<div style="font-size:12px;color:var(--muted);margin-top:5px">Convidado por <strong style="color:var(--text)">${esc(u.joinedVia.invitedBy)}</strong></div>`:""}
+  <div class="profile-av">${u.avatar
+    ?`<img src="${esc(u.avatar)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentElement.textContent='${init}'">`
+    :init}</div>
+  <div style="flex:1;min-width:0">
+    <div class="profile-name">${esc(u.nick||u.username)}</div>
+    <div class="profile-id">@${esc(u.username)} · ${esc(u.userId)}</div>
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+      ${u.isAdmin?`<span class="tag tag-yellow"><svg width="10" height="10"><use href="#ic-crown"/></svg> Admin</span>`:""}
+      ${u.isTeam?`<span class="tag tag-blue"><svg width="10" height="10"><use href="#ic-shield"/></svg> Equipe</span>`:`<span class="tag">Membro</span>`}
+    </div>
   </div>
   <div class="profile-stat">
     <div class="profile-stat-n">${u.totalInvites}</div>
     <div class="profile-stat-l">convites</div>
   </div>
-</div>
-${u.invitedPeople.length?`
-<div class="sec-head"><div class="sec-title">Membros Convidados</div></div>
-<div class="table-wrap">
-  <table class="dtable">
-    <thead><tr><th>Membro</th><th>Data</th></tr></thead>
-    <tbody>${u.invitedPeople.map(p=>`<tr><td style="font-weight:500;color:var(--text-bright)">${esc(p.username)}</td><td class="mono">${fmtDate(p.date)}</td></tr>`).join("")}</tbody>
-  </table>
-</div>`:emptyState("ic-inbox","Este membro ainda não convidou ninguém.")}`;
-  }catch(e){ el.innerHTML = emptyState("ic-search","Usuário não encontrado."); }
+</div>`;
 }
 
 // ── Admin ──────────────────────────────────────────────────────
