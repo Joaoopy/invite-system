@@ -377,13 +377,13 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
 .profile-stat-l{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
 
 /* ── Admin Panel ─────────────────────────────────────────────── */
-.admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:700px){.admin-grid{grid-template-columns:1fr}}
-.admin-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+.admin-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:18px;width:100%;box-sizing:border-box}
 .admin-card-title{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:var(--text-bright);letter-spacing:.07em;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-.log-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);line-height:1.9}
-.log-line{display:flex;gap:10px}
-.log-t{color:var(--dim);flex-shrink:0}.log-a{color:var(--cyan)}
+.admin-card .input{width:100%;min-width:0;box-sizing:border-box;display:block;margin-bottom:8px;flex:none}
+.admin-card .btn{width:100%;box-sizing:border-box;justify-content:center;display:flex}
+.log-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);line-height:1.9;word-break:break-all;white-space:pre-wrap}
+.log-line{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+.log-t{color:var(--dim);flex-shrink:0;white-space:nowrap}.log-a{color:var(--cyan);flex-shrink:0}
 
 /* ── Pagination ──────────────────────────────────────────────── */
 .pagination{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:18px}
@@ -805,39 +805,33 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
         <div class="sec-head" style="margin-bottom:20px">
           <div><div class="sec-title">Administração</div><div class="sec-sub">Controles do sistema</div></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-direction:column;gap:14px;width:100%;overflow:hidden">
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-trophy"/></svg> Ajustar Convites</div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <input class="input" id="adjId" placeholder="Discord ID do usuário"/>
-              <input class="input" id="adjTotal" type="number" placeholder="Novo total de convites"/>
-              <button class="btn btn-primary" onclick="adminSet()" style="justify-content:center">
-                <svg width="13" height="13"><use href="#ic-trophy"/></svg> Salvar
-              </button>
-            </div>
+            <input class="input" id="adjId" placeholder="Discord ID do usuário"/>
+            <input class="input" id="adjTotal" type="number" placeholder="Novo total de convites"/>
+            <button class="btn btn-primary" onclick="adminSet()">
+              <svg width="13" height="13"><use href="#ic-trophy"/></svg> Salvar
+            </button>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-refresh"/></svg> Resetar Convites</div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <input class="input" id="resetId" placeholder="Discord ID do usuário"/>
-              <button class="btn btn-danger" onclick="adminReset()" style="justify-content:center">
-                <svg width="13" height="13"><use href="#ic-refresh"/></svg> Zerar para zero
-              </button>
-            </div>
+            <input class="input" id="resetId" placeholder="Discord ID do usuário"/>
+            <button class="btn btn-danger" onclick="adminReset()">
+              <svg width="13" height="13"><use href="#ic-refresh"/></svg> Zerar para zero
+            </button>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-user"/></svg> Remover Membro</div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <input class="input" id="delId" placeholder="Discord ID do usuário"/>
-              <button class="btn btn-danger" onclick="adminDel()" style="justify-content:center">
-                <svg width="13" height="13"><use href="#ic-user"/></svg> Remover do sistema
-              </button>
-            </div>
+            <input class="input" id="delId" placeholder="Discord ID do usuário"/>
+            <button class="btn btn-danger" onclick="adminDel()">
+              <svg width="13" height="13"><use href="#ic-user"/></svg> Remover do sistema
+            </button>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-log"/></svg> Logs do Sistema</div>
             <div class="log-box" id="adminLogs">Carregando...</div>
-            <button class="btn btn-ghost" style="margin-top:10px;width:100%;justify-content:center" onclick="loadLogs()">
+            <button class="btn btn-ghost" style="margin-top:10px" onclick="loadLogs()">
               <svg width="13" height="13"><use href="#ic-refresh"/></svg> Atualizar Logs
             </button>
           </div>
