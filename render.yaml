@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: invite-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 3000
+
+  - type: worker
+    name: invite-bot
+    runtime: node
+    rootDir: bot
+    buildCommand: npm install
+    startCommand: node bot.js
