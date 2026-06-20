@@ -157,6 +157,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'I
 .sb-uname{font-weight:600;font-size:13px;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-role{font-size:10px;letter-spacing:.06em;text-transform:uppercase}
 .sb-role.admin{color:var(--gold)}
+.sb-role.supervisor{color:#a78bfa}
 .sb-role.team{color:var(--cyan)}
 
 nav{padding:12px 10px;flex:1;overflow-y:auto}
@@ -174,8 +175,10 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
   width:2px;height:60%;border-radius:0 2px 2px 0;
   background:var(--accent);box-shadow:0 0 8px var(--accent);
 }
-.nav-item.admin-only{display:none}
-.nav-item.admin-only.visible{display:flex}
+.nav-item.admin-only,.nav-item.history-only{display:none}
+.nav-item.admin-only.visible,.nav-item.history-only.visible{display:flex}
+.nav-label.admin-only,.nav-label.history-only{display:none}
+.nav-label.admin-only.visible,.nav-label.history-only.visible{display:block}
 
 .sb-footer{padding:14px 16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .sb-online{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
@@ -624,13 +627,14 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
       <div class="nav-item" data-page="team">
         <svg width="15" height="15"><use href="#ic-users"/></svg> Equipe
       </div>
-      <div class="nav-label">Admin</div>
-      <div class="nav-item admin-only" data-page="history">
+      <div class="nav-label history-only">Supervisão</div>
+      <div class="nav-item history-only" data-page="history">
         <svg width="15" height="15"><use href="#ic-history"/></svg> Histórico
       </div>
-      <div class="nav-item admin-only" data-page="profile">
+      <div class="nav-item history-only" data-page="profile">
         <svg width="15" height="15"><use href="#ic-search"/></svg> Buscar Membro
       </div>
+      <div class="nav-label admin-only">Admin</div>
       <div class="nav-item admin-only" data-page="admin">
         <svg width="15" height="15"><use href="#ic-settings"/></svg> Administração
       </div>
@@ -926,7 +930,12 @@ function showApp(){
   if(u.isAdmin){
     roleEl.textContent = "Administrador";
     roleEl.className = "sb-role admin";
-    document.querySelectorAll(".nav-item.admin-only").forEach(el => el.classList.add("visible"));
+    document.querySelectorAll(".nav-item.admin-only,.nav-label.admin-only").forEach(el => el.classList.add("visible"));
+    document.querySelectorAll(".nav-item.history-only,.nav-label.history-only").forEach(el => el.classList.add("visible"));
+  } else if(u.canViewHistory){
+    roleEl.textContent = "Supervisor";
+    roleEl.className = "sb-role supervisor";
+    document.querySelectorAll(".nav-item.history-only,.nav-label.history-only").forEach(el => el.classList.add("visible"));
   } else {
     roleEl.textContent = "Equipe";
     roleEl.className = "sb-role team";
@@ -978,7 +987,7 @@ function loadPage(p){
 
 // ── Dashboard ──────────────────────────────────────────────────
 async function loadDashboard(){
-  if(currentUser.isAdmin){
+  if(currentUser.isAdmin || currentUser.canViewHistory){
     document.getElementById("adminDash").style.display = "block";
     document.getElementById("teamDash").style.display  = "none";
     try{
