@@ -3,7 +3,6 @@ const express = require("express");
 const session = require("express-session");
 const cors = require("cors");
 const axios = require("axios");
-const { createClient } = require("@libsql/client");
 const path = require("path");
 
 const app = express();
@@ -19,54 +18,86 @@ const DISCORD = {
   adminRoles:   ["1513341421749407985", "1513570942415147219"],
 };
 
-// ── Turso DB ──────────────────────────────────────────────────────
-const db = createClient({
-  url:       process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
+// ── Turso via HTTP API (evita bugs do client SDK) ──────────────────
+const TURSO_URL   = (process.env.TURSO_DATABASE_URL || "").replace("libsql://", "https://");
+const TURSO_TOKEN = process.env.TURSO_AUTH_TOKEN;
+
+async function tursoExec(statements) {
+  // statements: array de { sql, args }
+  const body = {
+    requests: statements.map(s => ({
+      type: "execute",
+      stmt: { sql: s.sql, args: (s.args || []).map(toTursoArg) },
+    })).concat([{ type: "close" }]),
+  };
+
+  const res = await axios.post(`${TURSO_URL}/v2/pipeline`, body, {
+    headers: {
+      Authorization: `Bearer ${TURSO_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  return res.data.results;
+}
+
+function toTursoArg(v) {
+  if (v === null || v === undefined) return { type: "null" };
+  if (typeof v === "number") return { type: "integer", value: String(v) };
+  return { type: "text", value: String(v) };
+}
+
+function rowsFromResult(result) {
+  if (!result || result.type !== "ok") return [];
+  const res = result.response.result;
+  const cols = res.cols.map(c => c.name);
+  return res.rows.map(row => {
+    const obj = {};
+    row.forEach((cell, i) => {
+      obj[cols[i]] = cell.value !== undefined ? cell.value : null;
+    });
+    return obj;
+  });
+}
+
+async function query(sql, args = []) {
+  const results = await tursoExec([{ sql, args }]);
+  return rowsFromResult(results[0]);
+}
+
+async function run(sql, args = []) {
+  await tursoExec([{ sql, args }]);
+}
+
+async function logAction(action, details) {
+  await run("INSERT INTO logs (action, details) VALUES (?, ?)", [action, JSON.stringify(details)]);
+}
 
 async function initDB() {
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS users (
+  await tursoExec([
+    { sql: `CREATE TABLE IF NOT EXISTS users (
       userId TEXT PRIMARY KEY,
       username TEXT NOT NULL,
       avatar TEXT,
       totalInvites INTEGER DEFAULT 0,
       joinedAt TEXT DEFAULT (datetime('now'))
-    )
-  `);
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS invites (
+    )` },
+    { sql: `CREATE TABLE IF NOT EXISTS invites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       userId TEXT NOT NULL,
       username TEXT NOT NULL,
       invitedById TEXT,
       invitedBy TEXT,
       date TEXT DEFAULT (datetime('now'))
-    )
-  `);
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS logs (
+    )` },
+    { sql: `CREATE TABLE IF NOT EXISTS logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
       details TEXT,
       date TEXT DEFAULT (datetime('now'))
-    )
-  `);
+    )` },
+  ]);
   console.log("✅ Banco de dados Turso inicializado.");
-}
-
-async function query(sql, params = []) {
-  const res = await db.execute({ sql, args: params });
-  return res.rows;
-}
-
-async function run(sql, params = []) {
-  await db.execute({ sql, args: params });
-}
-
-async function logAction(action, details) {
-  await run("INSERT INTO logs (action, details) VALUES (?, ?)", [action, JSON.stringify(details)]);
 }
 
 // ── Cache de membros do Discord ──────────────────────────────────
@@ -236,7 +267,7 @@ app.get("/api/user/search", requireTeam, async (req, res) => {
         avatar:       m.user.avatar
           ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
           : null,
-        totalInvites: local.length ? local[0].totalInvites : 0,
+        totalInvites: local.length ? Number(local[0].totalInvites) : 0,
         roles:        m.roles,
         isAdmin:      isAdmin(m.roles),
         isTeam:       isTeam(m.roles),
@@ -257,37 +288,39 @@ app.post("/api/admin/refresh-cache", requireAdmin, async (req, res) => {
 // ── Stats pessoais ───────────────────────────────────────────────
 app.get("/api/my-stats", requireTeam, async (req, res) => {
   const userId = req.session.user.id;
-  const total   = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ?", [userId]))[0].c;
-  const today   = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date(date) = date('now')", [userId]))[0].c;
-  const week    = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date >= datetime('now','-7 days')", [userId]))[0].c;
-  const month   = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND strftime('%Y-%m',date) = strftime('%Y-%m','now')", [userId]))[0].c;
+  const total   = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ?", [userId]))[0].c);
+  const today   = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date(date) = date('now')", [userId]))[0].c);
+  const week    = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND date >= datetime('now','-7 days')", [userId]))[0].c);
+  const month   = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById = ? AND strftime('%Y-%m',date) = strftime('%Y-%m','now')", [userId]))[0].c);
   const history = await query("SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC LIMIT 10", [userId]);
-  const myRank  = (await query("SELECT COUNT(*) + 1 AS rank FROM users WHERE totalInvites > (SELECT totalInvites FROM users WHERE userId = ?)", [userId]))[0].rank;
+  const myRank  = Number((await query("SELECT COUNT(*) + 1 AS rank FROM users WHERE totalInvites > (SELECT totalInvites FROM users WHERE userId = ?)", [userId]))[0].rank);
   res.json({ total, today, week, month, history, rank: myRank });
 });
 
 // ── Ranking ────────────────────────────────────────────────────────
 app.get("/api/invites/ranking", requireTeam, async (req, res) => {
   const limit = parseInt(req.query.limit) || 20;
-  res.json(await query(
+  const rows = await query(
     "SELECT userId, username, avatar, totalInvites FROM users WHERE totalInvites > 0 ORDER BY totalInvites DESC LIMIT ?",
     [limit]
-  ));
+  );
+  res.json(rows.map(r => ({ ...r, totalInvites: Number(r.totalInvites) })));
 });
 
 app.get("/api/invites/ranking/monthly", requireTeam, async (req, res) => {
-  res.json(await query(`
+  const rows = await query(`
     SELECT invitedById AS userId, invitedBy AS username, COUNT(*) AS totalInvites
     FROM invites WHERE invitedById IS NOT NULL
       AND strftime('%Y-%m',date) = strftime('%Y-%m','now')
     GROUP BY invitedById ORDER BY totalInvites DESC LIMIT 20
-  `));
+  `);
+  res.json(rows.map(r => ({ ...r, totalInvites: Number(r.totalInvites) })));
 });
 
 // ── Stats dashboard ──────────────────────────────────────────────
 app.get("/api/stats", requireTeam, async (req, res) => {
-  const totalInvites   = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL"))[0].c;
-  const monthlyInvites = (await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL AND strftime('%Y-%m',date)=strftime('%Y-%m','now')"))[0].c;
+  const totalInvites   = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL"))[0].c);
+  const monthlyInvites = Number((await query("SELECT COUNT(*) AS c FROM invites WHERE invitedById IS NOT NULL AND strftime('%Y-%m',date)=strftime('%Y-%m','now')"))[0].c);
   const lastMembers    = await query("SELECT userId, username, invitedBy, date FROM invites ORDER BY date DESC LIMIT 5");
   res.json({ totalInvites, monthlyInvites, lastMembers });
 });
@@ -326,7 +359,7 @@ app.get("/api/invites/history", requireAdmin, async (req, res) => {
   const page   = parseInt(req.query.page)  || 1;
   const limit  = parseInt(req.query.limit) || 30;
   const offset = (page - 1) * limit;
-  const total  = (await query("SELECT COUNT(*) AS c FROM invites"))[0].c;
+  const total  = Number((await query("SELECT COUNT(*) AS c FROM invites"))[0].c);
   const data   = await query("SELECT * FROM invites ORDER BY date DESC LIMIT ? OFFSET ?", [limit, offset]);
   res.json({ total, page, limit, data });
 });
@@ -336,7 +369,8 @@ app.get("/api/user/:userId", requireTeam, async (req, res) => {
   if (!user.length) return res.status(404).json({ error: "Não encontrado." });
   const invitedPeople = await query("SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC", [req.params.userId]);
   const joinedViaRows = await query("SELECT invitedBy, date FROM invites WHERE userId = ? ORDER BY date ASC LIMIT 1", [req.params.userId]);
-  res.json({ ...user[0], invitedPeople, joinedVia: joinedViaRows[0] || null });
+  const userRow = { ...user[0], totalInvites: Number(user[0].totalInvites) };
+  res.json({ ...userRow, invitedPeople, joinedVia: joinedViaRows[0] || null });
 });
 
 app.get("/api/admin/logs", requireAdmin, async (req, res) => {
@@ -373,6 +407,6 @@ initDB().then(() => {
     getMembers().catch(e => console.error("[Cache warmup]", e.message));
   });
 }).catch(err => {
-  console.error("❌ Erro ao iniciar banco de dados:", err);
+  console.error("❌ Erro ao iniciar banco de dados:", err.response?.data || err.message);
   process.exit(1);
 });
