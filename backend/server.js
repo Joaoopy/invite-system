@@ -14,8 +14,31 @@ const DISCORD = {
   botToken:     process.env.DISCORD_BOT_TOKEN,
   guildId:      "1513325231647752213",
   redirectUri:  process.env.REDIRECT_URI || "http://localhost:3000/auth/callback",
-  teamRoleId:   "1513341421749407985",
-  adminRoles:   ["1513341421749407985", "1513570942415147219"],
+
+  // Cargos com acesso total: dashboard, ranking, equipe, histórico e painel admin
+  adminRoles: [
+    "1513341421749407985", // Equipe (cargo legado, mantido por segurança)
+    "1513570942415147219", // Administrador Geral
+    "1513571104734711879", // Responsável Geral de Divulgação do Partido
+    "1513570807560011957", // Presidente
+    "1513570695156858970", // Vice Presidente
+    "1513570569084338459", // Diretor Divulgacional
+  ],
+
+  // Cargos com acesso a histórico (mas sem editar/resetar convites)
+  supervisorRoles: [
+    "1513570451153096805", // Coordenador Administrativo
+    "1513570327915921569", // Coordenador
+    "1513570215466762323", // Supervisor
+  ],
+
+  // Cargos com acesso básico: dashboard pessoal, ranking, equipe
+  teamRoles: [
+    "1513566687260184577", // Instrutor
+    "1513565655796809798", // Estagiário
+    "1513565038294728714", // Divulgador Sênior
+    "1513564823957405756", // Divulgador Aprendiz
+  ],
 };
 
 // ── Turso via HTTP API (evita bugs do client SDK) ──────────────────
@@ -139,12 +162,28 @@ app.use(session({
 app.use(express.static(path.join(__dirname, "../frontend/public")));
 
 // ── Auth helpers ──────────────────────────────────────────────────
-function isTeam(roles)  { return roles.includes(DISCORD.teamRoleId); }
-function isAdmin(roles) { return DISCORD.adminRoles.some(r => roles.includes(r)); }
+function isAdmin(roles)      { return DISCORD.adminRoles.some(r => roles.includes(r)); }
+function isSupervisor(roles) { return DISCORD.supervisorRoles.some(r => roles.includes(r)); }
+function isTeamRole(roles)   { return DISCORD.teamRoles.some(r => roles.includes(r)); }
+
+// Pertence à equipe = tem qualquer um dos três níveis
+function isTeam(roles) {
+  return isAdmin(roles) || isSupervisor(roles) || isTeamRole(roles);
+}
+
+// Pode ver histórico = admin ou supervisor
+function canViewHistory(roles) {
+  return isAdmin(roles) || isSupervisor(roles);
+}
 
 function requireTeam(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
   if (!req.session.user.isTeam) return res.status(403).json({ error: "Sem permissão." });
+  next();
+}
+function requireHistoryAccess(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
+  if (!req.session.user.canViewHistory) return res.status(403).json({ error: "Sem permissão para ver histórico." });
   next();
 }
 function requireAdmin(req, res, next) {
@@ -205,7 +244,13 @@ app.get("/auth/callback", async (req, res) => {
       await run("INSERT INTO users (userId, username, avatar) VALUES (?, ?, ?)", [id, username, avatarUrl]);
     }
 
-    req.session.user = { id, username, avatar: avatarUrl, roles, isAdmin: isAdmin(roles), isTeam: true };
+    req.session.user = {
+      id, username, avatar: avatarUrl, roles,
+      isAdmin: isAdmin(roles),
+      isSupervisor: isSupervisor(roles),
+      canViewHistory: canViewHistory(roles),
+      isTeam: true,
+    };
 
     await logAction("LOGIN", { userId: id, username });
     res.redirect("/");
@@ -354,8 +399,8 @@ app.post("/api/invites", async (req, res) => {
   res.json({ success: true });
 });
 
-// ── Admin routes ─────────────────────────────────────────────────
-app.get("/api/invites/history", requireAdmin, async (req, res) => {
+// ── Histórico (admin e supervisor) ────────────────────────────────
+app.get("/api/invites/history", requireHistoryAccess, async (req, res) => {
   const page   = parseInt(req.query.page)  || 1;
   const limit  = parseInt(req.query.limit) || 30;
   const offset = (page - 1) * limit;
@@ -364,7 +409,7 @@ app.get("/api/invites/history", requireAdmin, async (req, res) => {
   res.json({ total, page, limit, data });
 });
 
-app.get("/api/user/:userId", requireTeam, async (req, res) => {
+app.get("/api/user/:userId", requireHistoryAccess, async (req, res) => {
   const user = await query("SELECT * FROM users WHERE userId = ?", [req.params.userId]);
   if (!user.length) return res.status(404).json({ error: "Não encontrado." });
   const invitedPeople = await query("SELECT username, date FROM invites WHERE invitedById = ? ORDER BY date DESC", [req.params.userId]);
