@@ -331,20 +331,37 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
 .mono{font-family:'JetBrains Mono',monospace;color:var(--muted);font-size:11px}
 
 /* ── Team Grid ───────────────────────────────────────────────── */
+.team-cat-title{
+  display:flex;align-items:center;gap:9px;
+  font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;
+  padding-bottom:10px;margin-bottom:14px;
+  border-bottom:1px solid;
+}
+.team-cat-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 8px currentColor}
+.team-cat-count{
+  margin-left:auto;font-family:'Inter',sans-serif;font-size:11px;font-weight:600;
+  color:var(--muted);background:var(--card);border:1px solid var(--border);
+  padding:2px 9px;border-radius:20px;letter-spacing:0;text-transform:none;
+}
 .team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
 .team-card{
   background:var(--card);border:1px solid var(--border);border-radius:var(--r);
   padding:20px;text-align:center;transition:all .22s;position:relative;overflow:hidden;
 }
-.team-card:hover{border-color:var(--border-lit);transform:translateY(-3px);box-shadow:0 8px 28px rgba(0,0,0,.3)}
+.team-card:hover{border-color:var(--role-color,var(--border-lit));transform:translateY(-3px);box-shadow:0 8px 28px rgba(0,0,0,.3)}
 .team-av{
   width:52px;height:52px;border-radius:50%;margin:0 auto 12px;
   background:linear-gradient(135deg,var(--accent),#7c3aed);
   display:grid;place-items:center;font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:#fff;overflow:hidden;
-  box-shadow:0 0 16px var(--accent-glow);
 }
 .team-av img{width:100%;height:100%;object-fit:cover}
-.team-name{font-weight:600;color:var(--text-bright);font-size:14px;margin-bottom:4px}
+.team-name{font-weight:600;color:var(--text-bright);font-size:14px;margin-bottom:6px}
+.team-role-badge{
+  display:inline-block;font-size:10px;font-weight:600;
+  padding:2px 9px;border-radius:20px;border:1px solid;
+  margin-bottom:8px;letter-spacing:.02em;
+}
 .team-invites{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;color:var(--text-bright)}
 .team-invites small{font-size:11px;font-family:'Inter',sans-serif;color:var(--muted);font-weight:400}
 .admin-crown{position:absolute;top:10px;right:10px;color:var(--gold);font-size:14px}
@@ -384,6 +401,17 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
 .admin-card-title{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:var(--text-bright);letter-spacing:.07em;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .admin-card .input{width:100%;min-width:0;box-sizing:border-box;display:block;margin-bottom:8px;flex:none}
 .admin-card .btn{width:100%;box-sizing:border-box;justify-content:center;display:flex}
+.admin-card select.input{
+  appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a6080' stroke-width='2'%3e%3cpath d='m6 9 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat:no-repeat;background-position:right 12px center;background-size:16px;
+  padding-right:36px;color:var(--text-bright);
+}
+.admin-card select.input option{background:var(--surface);color:var(--text-bright)}
+.promote-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.promote-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.promote-label{font-size:11px;color:var(--muted);white-space:nowrap}
+.promote-value{font-size:13px;font-weight:600;color:var(--text-bright);text-align:right}
 .log-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);line-height:1.9;word-break:break-all;white-space:pre-wrap}
 .log-line{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:2px}
 .log-t{color:var(--dim);flex-shrink:0;white-space:nowrap}.log-a{color:var(--cyan);flex-shrink:0}
@@ -769,7 +797,7 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
         <div class="sec-head">
           <div><div class="sec-title">Equipe de Divulgação</div><div class="sec-sub">Membros com cargo ativo no Discord</div></div>
         </div>
-        <div class="team-grid stagger" id="teamGrid"><div class="empty"><div class="spinner"></div></div></div>
+        <div id="teamCategories"><div class="empty"><div class="spinner"></div></div></div>
       </div>
 
       <!-- ── HISTORY (admin) ────────────────────────── -->
@@ -831,6 +859,37 @@ nav{padding:12px 10px;flex:1;overflow-y:auto}
             <button class="btn btn-danger" onclick="adminDel()">
               <svg width="13" height="13"><use href="#ic-user"/></svg> Remover do sistema
             </button>
+          </div>
+          <div class="admin-card">
+            <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-crown"/></svg> Promover Membro</div>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Selecione um membro da equipe para promover ou rebaixar de cargo.</p>
+            <select class="input" id="promoteSelect" onchange="onPromoteSelect()" style="margin-bottom:10px">
+              <option value="">Selecione um membro...</option>
+            </select>
+            <div id="promoteInfo" style="display:none">
+              <div class="promote-card">
+                <div class="promote-row">
+                  <span class="promote-label">Cargo atual</span>
+                  <span class="promote-value" id="promoteCurrent">—</span>
+                </div>
+                <div class="promote-row" id="promoteNextRow">
+                  <span class="promote-label">Próximo cargo (promover)</span>
+                  <span class="promote-value" id="promoteNext">—</span>
+                </div>
+                <div class="promote-row" id="promotePrevRow">
+                  <span class="promote-label">Cargo anterior (rebaixar)</span>
+                  <span class="promote-value" id="promotePrev">—</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-primary" id="promoteUpBtn" onclick="doPromote('up')" style="flex:1">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg> Promover
+                </button>
+                <button class="btn btn-danger" id="promoteDownBtn" onclick="doPromote('down')" style="flex:1">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg> Rebaixar
+                </button>
+              </div>
+            </div>
           </div>
           <div class="admin-card">
             <div class="admin-card-title"><svg width="14" height="14"><use href="#ic-log"/></svg> Logs do Sistema</div>
@@ -982,7 +1041,7 @@ function loadPage(p){
   if(p==="ranking")   loadRanking(rankTab);
   if(p==="team")      loadTeam();
   if(p==="history")   loadHistory(1);
-  if(p==="admin")     loadLogs();
+  if(p==="admin")     { loadLogs(); loadPromoteList(); }
 }
 
 // ── Dashboard ──────────────────────────────────────────────────
@@ -1101,28 +1160,55 @@ function switchRankTab(tab){
 }
 
 // ── Team ───────────────────────────────────────────────────────
+const CATEGORY_ORDER = ["Alto Conselho","Alto Escalão","Moderação Divulgacional","Equipe Divulgadora","Outros"];
+
 async function loadTeam(){
-  const el = document.getElementById("teamGrid");
+  const el = document.getElementById("teamCategories");
   el.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
   try{
     const team = await api("/api/team");
     if(!team.length){ el.innerHTML = emptyState("ic-users","Nenhum membro encontrado."); return; }
-    // Buscar ranking para cruzar convites
+
     let ranking = [];
     try{ ranking = await api("/api/invites/ranking?limit=200"); }catch(e){}
     const rankMap = {};
     ranking.forEach(r=>{ rankMap[r.userId]=r.totalInvites; });
-    el.innerHTML = team.map(m=>{
+
+    // Agrupar por categoria
+    const groups = {};
+    team.forEach(m=>{
+      const cat = m.roleCategory || "Outros";
+      if(!groups[cat]) groups[cat] = [];
+      groups[cat].push(m);
+    });
+
+    el.innerHTML = CATEGORY_ORDER
+      .filter(cat => groups[cat] && groups[cat].length)
+      .map(cat => {
+        const members = groups[cat];
+        const color = members[0].roleColor || "#64748b";
+        return `
+<div class="team-category" style="margin-bottom:26px">
+  <div class="team-cat-title" style="color:${color};border-color:${color}33">
+    <span class="team-cat-dot" style="background:${color}"></span>
+    ${esc(cat)}
+    <span class="team-cat-count">${members.length}</span>
+  </div>
+  <div class="team-grid stagger">
+    ${members.map(m=>{
       const init = (m.username||"?")[0].toUpperCase();
       const invites = rankMap[m.userId] || 0;
       return `
-<div class="team-card">
-  ${m.isAdmin?`<div class="admin-crown"><svg width="14" height="14"><use href="#ic-crown"/></svg></div>`:""}
-  <div class="team-av">${m.avatar?`<img src="${esc(m.avatar)}" alt="" onerror="this.parentElement.textContent='${init}'">`:init}</div>
-  <div class="team-name">${esc(m.username)}</div>
+<div class="team-card" style="--role-color:${m.roleColor}">
+  <div class="team-av" style="box-shadow:0 0 14px ${m.roleColor}33;border:1.5px solid ${m.roleColor}55">${m.avatar?`<img src="${esc(m.avatar)}" alt="" onerror="this.parentElement.textContent='${init}'">`:init}</div>
+  <div class="team-name">${esc(m.nick||m.username)}</div>
+  <div class="team-role-badge" style="color:${m.roleColor};background:${m.roleColor}18;border-color:${m.roleColor}33">${esc(m.roleName)}</div>
   <div class="team-invites">${invites}<small> convites</small></div>
 </div>`;
-    }).join("");
+    }).join("")}
+  </div>
+</div>`;
+      }).join("");
   }catch(e){ el.innerHTML = emptyState("ic-users","Erro ao carregar equipe."); }
 }
 
@@ -1277,6 +1363,73 @@ async function loadLogs(){
   }catch{ if(el) el.textContent="Erro ao carregar logs."; }
 }
 
+// ── Promoção de membros ─────────────────────────────────────────
+let promoteTeamData = [];
+let hierarchyData = [];
+
+async function loadPromoteList(){
+  const select = document.getElementById("promoteSelect");
+  if(!select) return;
+  try{
+    const [team, hierarchy] = await Promise.all([api("/api/team"), api("/api/hierarchy")]);
+    promoteTeamData = team;
+    hierarchyData = hierarchy;
+    select.innerHTML = `<option value="">Selecione um membro...</option>` +
+      team.map(m => `<option value="${m.userId}">${esc(m.nick||m.username)} — ${esc(m.roleName)}</option>`).join("");
+  }catch(e){
+    select.innerHTML = `<option value="">Erro ao carregar membros</option>`;
+  }
+}
+
+function onPromoteSelect(){
+  sndClick();
+  const userId = document.getElementById("promoteSelect").value;
+  const infoEl = document.getElementById("promoteInfo");
+  if(!userId){ infoEl.style.display = "none"; return; }
+
+  const member = promoteTeamData.find(m => m.userId === userId);
+  if(!member) return;
+
+  const idx = hierarchyData.findIndex(h => member.roles.includes(h.id));
+  const current = idx !== -1 ? hierarchyData[idx] : null;
+  const next = idx > 0 ? hierarchyData[idx - 1] : null;
+  const prev = (idx !== -1 && idx < hierarchyData.length - 1) ? hierarchyData[idx + 1] : null;
+
+  document.getElementById("promoteCurrent").textContent = current ? current.name : "Sem cargo";
+  document.getElementById("promoteNext").textContent = next ? next.name : "—";
+  document.getElementById("promotePrev").textContent = prev ? prev.name : "—";
+
+  const upBtn = document.getElementById("promoteUpBtn");
+  const downBtn = document.getElementById("promoteDownBtn");
+  upBtn.disabled = !next;
+  downBtn.disabled = !prev;
+  upBtn.style.opacity = next ? "1" : ".4";
+  downBtn.style.opacity = prev ? "1" : ".4";
+
+  infoEl.style.display = "block";
+}
+
+async function doPromote(direction){
+  sndClick();
+  const userId = document.getElementById("promoteSelect").value;
+  if(!userId){ toast("Selecione um membro.","error"); return; }
+
+  const label = direction === "up" ? "promover" : "rebaixar";
+  if(!confirm(`Confirma ${label} este membro?`)) return;
+
+  try{
+    const result = await api("/api/admin/promote","POST",{ userId, direction });
+    toast(`Cargo alterado: ${result.from} → ${result.to}`, "success");
+    sndSuccess();
+    await loadPromoteList();
+    document.getElementById("promoteSelect").value = userId;
+    onPromoteSelect();
+  }catch(e){
+    toast(e.message || "Erro ao alterar cargo.", "error");
+    sndError();
+  }
+}
+
 function logout(){ sndClick(); window.location.href="/auth/logout"; }
 
 function toggleSidebar(){
@@ -1300,7 +1453,11 @@ async function api(path,method="GET",body=null){
   const opts={method,headers:{"Content-Type":"application/json"}};
   if(body) opts.body=JSON.stringify(body);
   const res=await fetch(path,opts);
-  if(!res.ok) throw new Error("HTTP "+res.status);
+  if(!res.ok){
+    let msg = "HTTP "+res.status;
+    try{ const data = await res.json(); if(data.error) msg = data.error; }catch(e){}
+    throw new Error(msg);
+  }
   return res.json();
 }
 function esc(s){ if(!s)return""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }

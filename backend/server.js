@@ -41,6 +41,49 @@ const DISCORD = {
   ],
 };
 
+// ── Hierarquia completa (ordem do mais alto pro mais baixo) ────────
+// Usada para: categorizar a página Equipe e fazer promoção/rebaixamento
+const HIERARCHY = [
+  { id: "1513571104734711879", name: "Responsável Geral de Divulgação", category: "Alto Conselho", color: "#f5a623" },
+  { id: "1513570942415147219", name: "Administrador Geral",             category: "Alto Conselho", color: "#f5a623" },
+  { id: "1513570807560011957", name: "Presidente",                      category: "Alto Escalão",  color: "#3b82f6" },
+  { id: "1513570695156858970", name: "Vice Presidente",                 category: "Alto Escalão",  color: "#3b82f6" },
+  { id: "1513570569084338459", name: "Diretor Divulgacional",           category: "Alto Escalão",  color: "#3b82f6" },
+  { id: "1513570451153096805", name: "Coordenador Administrativo",      category: "Moderação Divulgacional", color: "#22d3ee" },
+  { id: "1513570327915921569", name: "Coordenador",                     category: "Moderação Divulgacional", color: "#22d3ee" },
+  { id: "1513570215466762323", name: "Supervisor",                      category: "Equipe Divulgadora", color: "#a78bfa" },
+  { id: "1513566687260184577", name: "Instrutor",                       category: "Equipe Divulgadora", color: "#a78bfa" },
+  { id: "1513565655796809798", name: "Estagiário",                      category: "Equipe Divulgadora", color: "#a78bfa" },
+  { id: "1513565038294728714", name: "Divulgador Sênior",               category: "Equipe Divulgadora", color: "#a78bfa" },
+  { id: "1513564823957405756", name: "Divulgador Aprendiz",             category: "Equipe Divulgadora", color: "#a78bfa" },
+];
+
+function getHierarchyEntry(roleId) {
+  return HIERARCHY.find(h => h.id === roleId) || null;
+}
+
+// Pega o cargo de hierarquia mais alto que o membro possui
+function getHighestRole(roles) {
+  for (const h of HIERARCHY) {
+    if (roles.includes(h.id)) return h;
+  }
+  return null;
+}
+
+// Pega o próximo cargo (acima) na hierarquia, undefined se já for o topo
+function getNextRole(currentRoleId) {
+  const idx = HIERARCHY.findIndex(h => h.id === currentRoleId);
+  if (idx <= 0) return null; // já é o topo ou não encontrado
+  return HIERARCHY[idx - 1];
+}
+
+// Pega o cargo anterior (abaixo) na hierarquia, undefined se já for o último
+function getPreviousRole(currentRoleId) {
+  const idx = HIERARCHY.findIndex(h => h.id === currentRoleId);
+  if (idx === -1 || idx >= HIERARCHY.length - 1) return null;
+  return HIERARCHY[idx + 1];
+}
+
 // ── Turso via HTTP API (evita bugs do client SDK) ──────────────────
 const TURSO_URL   = (process.env.TURSO_DATABASE_URL || "").replace("libsql://", "https://");
 const TURSO_TOKEN = process.env.TURSO_AUTH_TOKEN;
@@ -273,21 +316,79 @@ app.get("/api/team", requireTeam, async (req, res) => {
     const members = await getMembers();
     const team = members
       .filter(m => isTeam(m.roles))
-      .map(m => ({
-        userId:   m.user.id,
-        username: m.user.username,
-        nick:     m.nick || null,
-        avatar:   m.user.avatar
-          ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
-          : null,
-        roles:       m.roles,
-        isAdmin:     isAdmin(m.roles),
-        isSupervisor:isSupervisor(m.roles),
-      }));
+      .map(m => {
+        const hierarchy = getHighestRole(m.roles);
+        return {
+          userId:   m.user.id,
+          username: m.user.username,
+          nick:     m.nick || null,
+          avatar:   m.user.avatar
+            ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
+            : null,
+          roles:        m.roles,
+          isAdmin:      isAdmin(m.roles),
+          isSupervisor: isSupervisor(m.roles),
+          roleName:     hierarchy ? hierarchy.name : "Sem cargo",
+          roleCategory: hierarchy ? hierarchy.category : "Outros",
+          roleColor:    hierarchy ? hierarchy.color : "#64748b",
+        };
+      });
     res.json(team);
   } catch (err) {
     console.error("[Team Error]", err.response?.data || err.message);
     res.status(500).json({ error: "Erro ao buscar membros." });
+  }
+});
+
+// ── Hierarquia completa (para o painel de promoção) ────────────────
+app.get("/api/hierarchy", requireAdmin, (req, res) => {
+  res.json(HIERARCHY);
+});
+
+// ── Promover / rebaixar membro ──────────────────────────────────────
+app.post("/api/admin/promote", requireAdmin, async (req, res) => {
+  const { userId, direction } = req.body; // direction: "up" ou "down"
+  if (!userId || !["up", "down"].includes(direction)) {
+    return res.status(400).json({ error: "Dados inválidos." });
+  }
+  try {
+    const members = await getMembers(true);
+    const member = members.find(m => m.user.id === userId);
+    if (!member) return res.status(404).json({ error: "Membro não encontrado no servidor." });
+
+    const currentRole = getHighestRole(member.roles);
+    if (!currentRole) return res.status(400).json({ error: "Este membro não possui nenhum cargo da hierarquia." });
+
+    const targetRole = direction === "up"
+      ? getNextRole(currentRole.id)
+      : getPreviousRole(currentRole.id);
+
+    if (!targetRole) {
+      return res.status(400).json({
+        error: direction === "up" ? "Este membro já está no cargo mais alto." : "Este membro já está no cargo mais baixo."
+      });
+    }
+
+    // Remove cargo atual, adiciona novo cargo
+    await axios.delete(
+      `https://discord.com/api/guilds/${DISCORD.guildId}/members/${userId}/roles/${currentRole.id}`,
+      { headers: { Authorization: `Bot ${DISCORD.botToken}` } }
+    );
+    await axios.put(
+      `https://discord.com/api/guilds/${DISCORD.guildId}/members/${userId}/roles/${targetRole.id}`,
+      {},
+      { headers: { Authorization: `Bot ${DISCORD.botToken}` } }
+    );
+
+    membersCache.lastFetch = 0; // invalida cache
+    await logAction(direction === "up" ? "PROMOTE" : "DEMOTE", {
+      userId, from: currentRole.name, to: targetRole.name,
+    });
+
+    res.json({ success: true, from: currentRole.name, to: targetRole.name });
+  } catch (err) {
+    console.error("[Promote Error]", err.response?.data || err.message);
+    res.status(500).json({ error: "Erro ao alterar cargo. Verifique se o bot tem permissão Gerenciar Cargos e está posicionado acima do cargo na hierarquia do Discord." });
   }
 });
 
