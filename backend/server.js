@@ -272,7 +272,7 @@ app.get("/api/team", requireTeam, async (req, res) => {
   try {
     const members = await getMembers();
     const team = members
-      .filter(m => m.roles.includes(DISCORD.teamRoleId))
+      .filter(m => isTeam(m.roles))
       .map(m => ({
         userId:   m.user.id,
         username: m.user.username,
@@ -280,8 +280,9 @@ app.get("/api/team", requireTeam, async (req, res) => {
         avatar:   m.user.avatar
           ? `https://cdn.discordapp.com/avatars/${m.user.id}/${m.user.avatar}.png`
           : null,
-        roles:   m.roles,
-        isAdmin: isAdmin(m.roles),
+        roles:       m.roles,
+        isAdmin:     isAdmin(m.roles),
+        isSupervisor:isSupervisor(m.roles),
       }));
     res.json(team);
   } catch (err) {
